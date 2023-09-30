@@ -20,11 +20,13 @@ import (
 
 type User struct {
 	Id       int    `json:"id"`
-	Login    string `json:"name"`
+	Login    string `json:"login"`
 	Password string `json:"password"`
 	Token    string `json:"token"`
-	Name     string
-	LastName string
+	Name     string `json:"name"`
+	LastName string `json:"lastname"`
+	Role     int
+	OrgId    int
 }
 
 type UserGoogleInfo struct {
@@ -35,7 +37,7 @@ type UserGoogleInfo struct {
 	FamilyName string `json:"family_name"`
 }
 
-var users = map[string]string{}
+var users = map[string]int{}
 
 func Login(page http.ResponseWriter, r *http.Request) {
 	tmpl, err := template.ParseFiles("html_files/login.html")
@@ -67,8 +69,8 @@ func LoginPost(page http.ResponseWriter, r *http.Request) {
 
 	res := db.QueryRow("SELECT * FROM public.users WHERE login = $1 AND password = $2", login, hashedPass)
 	user := User{}
-	err = res.Scan(&user.Id, &user.Login, &user.Password, &user.Name, &user.LastName)
-
+	err = res.Scan(&user.Id, &user.Login, &user.Password, &user.Name, &user.LastName, &user.Role, &user.OrgId)
+	fmt.Println(err)
 	if login == "" || password == "" {
 		tmpl, err := template.ParseFiles("html_files/login.html")
 		if err != nil {
@@ -83,29 +85,31 @@ func LoginPost(page http.ResponseWriter, r *http.Request) {
 		DB:       0,  // use default DB
 	})
 
-	if err == nil {
+	if user.Id != 0 {
 
+		u := User{
+			Id:       user.Id,
+			Login:    user.Login,
+			Name:     user.Name,
+			LastName: user.LastName,
+			Password: user.Password,
+			Token:    hashedToken,
+		}
+		jb, errr := json.Marshal(&u)
+
+		users[u.Token] = u.Id
 		ctx := context.Background()
 		for k, v := range users {
-			err := client.HSet(ctx, "user-session:123", k, v).Err()
+			err := client.HSet(ctx, "user-session:1234", k, v).Err()
 			if err != nil {
 				panic(err)
 			}
 		}
 
-		var data = []byte(hashedToken)
-		u := User{
-			Id:       user.Id,
-			Name:     user.Name,
-			Password: user.Password,
-			Token:    string(data),
-		}
-		jb, errr := json.Marshal(&u)
-
 		if errr != nil {
 			panic(errr)
 		}
-		req2, err4 := http.NewRequest("POST", "http://localhost:8080/", bytes.NewBuffer(jb))
+		req2, err4 := http.NewRequest("POST", "http://localhost:8080/index", bytes.NewBuffer(jb))
 		req2.Header.Set("Content-Type", "application/json")
 		if err4 != nil {
 			panic(err4)
@@ -117,7 +121,7 @@ func LoginPost(page http.ResponseWriter, r *http.Request) {
 		}
 		defer re2.Body.Close()
 
-		http.Redirect(page, r, "http://localhost:8080/", http.StatusSeeOther)
+		http.Redirect(page, r, "http://localhost:8080/index", http.StatusSeeOther)
 
 	}
 }
@@ -169,7 +173,7 @@ func RegisterCheck(page http.ResponseWriter, r *http.Request) {
 
 	defer db.Close()
 
-	_, err = db.Exec("INSERT INTO public.users (name, lastname, login, password) VALUES ($1, $2, $3, $4)", name, lastname, login, hashedPass)
+	_, err = db.Exec("INSERT INTO public.users (name, lastname, login, password, role) VALUES ($1, $2, $3, $4, $5)", name, lastname, login, hashedPass, 3)
 
 	http.Redirect(page, r, "/", http.StatusSeeOther)
 }
@@ -181,7 +185,7 @@ func index(page http.ResponseWriter, r *http.Request) {
 		DB:       0,  // use default DB
 	})
 	ctx := context.Background()
-	userSession := client.HGetAll(ctx, "user-session:123").Val()
+	userSession := client.HGetAll(ctx, "user-session:1234").Val()
 
 	fmt.Println(userSession)
 }
@@ -225,29 +229,6 @@ func HandleIndex(page http.ResponseWriter, r *http.Request) {
 		panic(err3)
 	}
 
-	u := User{
-		Id:       0,
-		Name:     "",
-		Password: "",
-		Token:    token.AccessToken,
-	}
-	jb, errr := json.Marshal(&u)
-
-	if errr != nil {
-		panic(errr)
-	}
-	req2, err4 := http.NewRequest("POST", "http://localhost:8080/", bytes.NewBuffer(jb))
-	req2.Header.Set("Content-Type", "application/json")
-	if err4 != nil {
-		panic(err4)
-	}
-	cli2 := &http.Client{}
-	re2, err5 := cli2.Do(req2)
-	if err5 != nil {
-		panic(err5)
-	}
-	defer re2.Body.Close()
-
 	deserializedUser := UserGoogleInfo{}
 	err = json.Unmarshal([]byte(string(cont)), &deserializedUser)
 
@@ -262,9 +243,57 @@ func HandleIndex(page http.ResponseWriter, r *http.Request) {
 
 	res := db.QueryRow("SELECT * FROM public.users WHERE login = $1", deserializedUser.Name)
 	user := User{}
-	err = res.Scan(&user.Id, &user.Login, &user.Password, &user.Name, &user.LastName)
-	if err == nil {
-		http.Redirect(page, r, "http://localhost:8080/", http.StatusSeeOther)
+	err = res.Scan(&user.Id, &user.Login, &user.Password, &user.Name, &user.LastName, &user.Role, &user.OrgId)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	client := redis.NewClient(&redis.Options{
+		Addr:     "localhost:2222",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
+	token2 := user.Login + user.Password
+	hashToken := md5.Sum([]byte(token2))
+	hashedToken := hex.EncodeToString(hashToken[:])
+	fmt.Println(user.Login)
+	if user.Login != "" {
+		u := User{
+			Id:       user.Id,
+			Login:    user.Login,
+			Name:     user.Name,
+			LastName: user.LastName,
+			Password: user.Password,
+			Token:    hashedToken,
+		}
+		users[u.Token] = u.Id
+		ctx := context.Background()
+		for k, v := range users {
+			err := client.HSet(ctx, "user-session:1234", k, v).Err()
+			if err != nil {
+				panic(err)
+			}
+		}
+		jb, errr := json.Marshal(&u)
+
+		if errr != nil {
+			panic(errr)
+		}
+		//fmt.Println(bytes.NewBuffer(jb))
+		req2, err4 := http.NewRequest("POST", "http://localhost:8080/index", bytes.NewBuffer(jb))
+		req2.Header.Set("Content-Type", "application/json")
+		if err4 != nil {
+			panic(err4)
+		}
+		cli2 := &http.Client{}
+		re2, err5 := cli2.Do(req2)
+		if err5 != nil {
+			panic(err5)
+		}
+		defer re2.Body.Close()
+
+		http.Redirect(page, r, "http://localhost:8080/index", http.StatusSeeOther)
 	} else {
 		tmpl, err := template.ParseFiles("html_files/register.html")
 		if err != nil {
