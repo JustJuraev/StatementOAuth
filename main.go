@@ -147,75 +147,6 @@ func LoginPost(page http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func SentToOrganization(page http.ResponseWriter, r *http.Request) {
-
-	jb, errr := json.Marshal(&postusers[0])
-
-	if errr != nil {
-		panic(errr)
-	}
-
-	req2, err4 := http.NewRequest("POST", "http://localhost:8084/handleouathcheck", bytes.NewBuffer(jb))
-	req2.Header.Set("Content-Type", "application/json")
-	if err4 != nil {
-		panic(err4)
-	}
-	cli2 := &http.Client{}
-	re2, err5 := cli2.Do(req2)
-	if err5 != nil {
-		panic(err5)
-	}
-	defer re2.Body.Close()
-
-	http.Redirect(page, r, "http://localhost:8084/handleouathcheck", http.StatusSeeOther)
-}
-
-func SentToAdminPanel(page http.ResponseWriter, r *http.Request) {
-
-	jb, errr := json.Marshal(&postusers[0])
-
-	if errr != nil {
-		panic(errr)
-	}
-
-	req2, err4 := http.NewRequest("POST", "http://localhost:8082/handleouathcheck", bytes.NewBuffer(jb))
-	req2.Header.Set("Content-Type", "application/json")
-	if err4 != nil {
-		panic(err4)
-	}
-	cli2 := &http.Client{}
-	re2, err5 := cli2.Do(req2)
-	if err5 != nil {
-		panic(err5)
-	}
-	defer re2.Body.Close()
-
-	http.Redirect(page, r, "http://localhost:8082/handleouathcheck", http.StatusSeeOther)
-}
-
-func SentToForm(page http.ResponseWriter, r *http.Request) {
-
-	jb, errr := json.Marshal(&postusers[0])
-
-	if errr != nil {
-		panic(errr)
-	}
-
-	req2, err4 := http.NewRequest("POST", "http://localhost:8080/index", bytes.NewBuffer(jb))
-	req2.Header.Set("Content-Type", "application/json")
-	if err4 != nil {
-		panic(err4)
-	}
-	cli2 := &http.Client{}
-	re2, err5 := cli2.Do(req2)
-	if err5 != nil {
-		panic(err5)
-	}
-	defer re2.Body.Close()
-
-	http.Redirect(page, r, "http://localhost:8082/index", http.StatusSeeOther)
-}
-
 func RegisterPage(page http.ResponseWriter, r *http.Request) {
 	tmpl, err := template.ParseFiles("html_files/register.html")
 	if err != nil {
@@ -385,9 +316,7 @@ func main() {
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
 	http.HandleFunc("/", Login)
 	http.HandleFunc("/login_check", LoginPost)
-	http.HandleFunc("/senttoadminpanel", SentToAdminPanel)
-	http.HandleFunc("/senttoorganization", SentToOrganization)
-	http.HandleFunc("/senttoform", SentToForm)
+
 	http.HandleFunc("/logingoogle", handleGoogleLogin)
 	http.HandleFunc("/index2", HandleIndex)
 	http.HandleFunc("/register", RegisterPage)
