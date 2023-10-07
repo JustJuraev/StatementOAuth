@@ -37,14 +37,45 @@ type UserGoogleInfo struct {
 	FamilyName string `json:"family_name"`
 }
 
+type RedirectURLs struct {
+	Id        int
+	Cliend_id string
+	RedirectU string
+}
+
 var users = map[string]int{}
+var postusers = []User{}
 
 func Login(page http.ResponseWriter, r *http.Request) {
 	tmpl, err := template.ParseFiles("html_files/login.html")
 	if err != nil {
 		panic(err)
 	}
-	tmpl.ExecuteTemplate(page, "login", nil)
+	cliend_id := r.URL.Query().Get("cliend_id")
+	//	fmt.Println(cliend_id)
+
+	connStr := "user=postgres password=123456 dbname=mygovdb sslmode=disable"
+	db, err := sql.Open("postgres", connStr)
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	defer db.Close()
+
+	if cliend_id != "" {
+		res := db.QueryRow("SELECT * FROM public.redirecturls WHERE cliend_id = $1", cliend_id)
+		rdu := RedirectURLs{}
+		err3 := res.Scan(&rdu.Id, &rdu.Cliend_id, &rdu.RedirectU)
+		if err3 != nil {
+			fmt.Println(err3)
+		}
+		//str := rdu.RedirectU
+		tmpl.ExecuteTemplate(page, "login", rdu.RedirectU)
+	} else {
+		tmpl.ExecuteTemplate(page, "login", nil)
+	}
+
 }
 
 func LoginPost(page http.ResponseWriter, r *http.Request) {
@@ -53,13 +84,14 @@ func LoginPost(page http.ResponseWriter, r *http.Request) {
 	db, err := sql.Open("postgres", connStr)
 
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 
 	defer db.Close()
 
 	login := r.FormValue("login")
 	password := r.FormValue("password")
+	redirectu := r.FormValue("redirectu")
 	hash := md5.Sum([]byte(password))
 	hashedPass := hex.EncodeToString(hash[:])
 
@@ -70,22 +102,17 @@ func LoginPost(page http.ResponseWriter, r *http.Request) {
 	res := db.QueryRow("SELECT * FROM public.users WHERE login = $1 AND password = $2", login, hashedPass)
 	user := User{}
 	err = res.Scan(&user.Id, &user.Login, &user.Password, &user.Name, &user.LastName, &user.Role, &user.OrgId)
-	fmt.Println(err)
+
 	if login == "" || password == "" {
-		tmpl, err := template.ParseFiles("html_files/login.html")
-		if err != nil {
-			panic(err)
+		tmpl, err2 := template.ParseFiles("html_files/login.html")
+		if err2 != nil {
+			panic(err2)
 		}
-		tmpl.ExecuteTemplate(page, "login", "поле логина или пароля не может быть пустым")
+		message := "поле логина или пароля не может быть пустым"
+		tmpl.ExecuteTemplate(page, "login", message)
 	}
 
-	client := redis.NewClient(&redis.Options{
-		Addr:     "localhost:2222",
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
-
-	if user.Id != 0 {
+	if user.Id != 0 && redirectu != "" {
 
 		u := User{
 			Id:       user.Id,
@@ -94,22 +121,17 @@ func LoginPost(page http.ResponseWriter, r *http.Request) {
 			LastName: user.LastName,
 			Password: user.Password,
 			Token:    hashedToken,
+			Role:     user.Role,
+			OrgId:    user.OrgId,
 		}
-		jb, errr := json.Marshal(&u)
 
-		users[u.Token] = u.Id
-		ctx := context.Background()
-		for k, v := range users {
-			err := client.HSet(ctx, "user-session:1234", k, v).Err()
-			if err != nil {
-				panic(err)
-			}
-		}
+		jb, errr := json.Marshal(&u)
 
 		if errr != nil {
 			panic(errr)
 		}
-		req2, err4 := http.NewRequest("POST", "http://localhost:8080/index", bytes.NewBuffer(jb))
+
+		req2, err4 := http.NewRequest("POST", redirectu, bytes.NewBuffer(jb))
 		req2.Header.Set("Content-Type", "application/json")
 		if err4 != nil {
 			panic(err4)
@@ -121,9 +143,77 @@ func LoginPost(page http.ResponseWriter, r *http.Request) {
 		}
 		defer re2.Body.Close()
 
-		http.Redirect(page, r, "http://localhost:8080/index", http.StatusSeeOther)
-
+		http.Redirect(page, r, redirectu, http.StatusSeeOther)
 	}
+}
+
+func SentToOrganization(page http.ResponseWriter, r *http.Request) {
+
+	jb, errr := json.Marshal(&postusers[0])
+
+	if errr != nil {
+		panic(errr)
+	}
+
+	req2, err4 := http.NewRequest("POST", "http://localhost:8084/handleouathcheck", bytes.NewBuffer(jb))
+	req2.Header.Set("Content-Type", "application/json")
+	if err4 != nil {
+		panic(err4)
+	}
+	cli2 := &http.Client{}
+	re2, err5 := cli2.Do(req2)
+	if err5 != nil {
+		panic(err5)
+	}
+	defer re2.Body.Close()
+
+	http.Redirect(page, r, "http://localhost:8084/handleouathcheck", http.StatusSeeOther)
+}
+
+func SentToAdminPanel(page http.ResponseWriter, r *http.Request) {
+
+	jb, errr := json.Marshal(&postusers[0])
+
+	if errr != nil {
+		panic(errr)
+	}
+
+	req2, err4 := http.NewRequest("POST", "http://localhost:8082/handleouathcheck", bytes.NewBuffer(jb))
+	req2.Header.Set("Content-Type", "application/json")
+	if err4 != nil {
+		panic(err4)
+	}
+	cli2 := &http.Client{}
+	re2, err5 := cli2.Do(req2)
+	if err5 != nil {
+		panic(err5)
+	}
+	defer re2.Body.Close()
+
+	http.Redirect(page, r, "http://localhost:8082/handleouathcheck", http.StatusSeeOther)
+}
+
+func SentToForm(page http.ResponseWriter, r *http.Request) {
+
+	jb, errr := json.Marshal(&postusers[0])
+
+	if errr != nil {
+		panic(errr)
+	}
+
+	req2, err4 := http.NewRequest("POST", "http://localhost:8080/index", bytes.NewBuffer(jb))
+	req2.Header.Set("Content-Type", "application/json")
+	if err4 != nil {
+		panic(err4)
+	}
+	cli2 := &http.Client{}
+	re2, err5 := cli2.Do(req2)
+	if err5 != nil {
+		panic(err5)
+	}
+	defer re2.Body.Close()
+
+	http.Redirect(page, r, "http://localhost:8082/index", http.StatusSeeOther)
 }
 
 func RegisterPage(page http.ResponseWriter, r *http.Request) {
@@ -176,18 +266,6 @@ func RegisterCheck(page http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("INSERT INTO public.users (name, lastname, login, password, role) VALUES ($1, $2, $3, $4, $5)", name, lastname, login, hashedPass, 3)
 
 	http.Redirect(page, r, "/", http.StatusSeeOther)
-}
-
-func index(page http.ResponseWriter, r *http.Request) {
-	client := redis.NewClient(&redis.Options{
-		Addr:     "localhost:2222",
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
-	ctx := context.Background()
-	userSession := client.HGetAll(ctx, "user-session:1234").Val()
-
-	fmt.Println(userSession)
 }
 
 var (
@@ -301,17 +379,15 @@ func HandleIndex(page http.ResponseWriter, r *http.Request) {
 		}
 		tmpl.ExecuteTemplate(page, "register", deserializedUser)
 	}
-
-	//fmt.Println(token.AccessToken)
-	//	fmt.Fprintf(page, string(cont))
-	//http.Redirect(page, r, "http://localhost:8080/", http.StatusSeeOther)
 }
 
 func main() {
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
 	http.HandleFunc("/", Login)
 	http.HandleFunc("/login_check", LoginPost)
-	http.HandleFunc("/index", index)
+	http.HandleFunc("/senttoadminpanel", SentToAdminPanel)
+	http.HandleFunc("/senttoorganization", SentToOrganization)
+	http.HandleFunc("/senttoform", SentToForm)
 	http.HandleFunc("/logingoogle", handleGoogleLogin)
 	http.HandleFunc("/index2", HandleIndex)
 	http.HandleFunc("/register", RegisterPage)
